@@ -2,7 +2,10 @@
 #include <comdef.h>
 #include <string>
 
-#import "VGCoreAuto.tlb" rename_namespace("VGCore") named_guids
+#import "VGCoreAuto.tlb" rename_namespace("VGCore") named_guids \
+    rename("GetCommandLine", "VGGetCommandLine") \
+    rename("CopyFile", "VGCopyFile") \
+    rename("FindWindow", "VGFindWindow")
 
 using namespace VGCore;
 
@@ -11,7 +14,7 @@ static const wchar_t* kCutGrid = L"CodexMarks.CreateCutGrid";
 static const wchar_t* kCutPlot = L"CodexMarks.CutPlotOutput";
 
 static HINSTANCE g_hInst = nullptr;
-static _ApplicationPtr g_app;
+static ApplicationPtr g_app;
 static DWORD g_cookie = 0;
 
 static std::wstring GetScriptDir()
