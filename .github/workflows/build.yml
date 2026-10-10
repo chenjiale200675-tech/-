@@ -1,0 +1,21 @@
+name: build-cpg
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build x64 CPG
+        shell: pwsh
+        run: msbuild CodexMarksPlugin.sln /p:Configuration=Release /p:Platform=x64 /m
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexMarksPlugin-cpg
+          path: x64/Release/CodexMarksPlugin.cpg
