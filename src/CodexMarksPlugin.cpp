@@ -14,7 +14,7 @@ static const wchar_t* kCutGrid = L"CodexMarks.CreateCutGrid";
 static const wchar_t* kCutPlot = L"CodexMarks.CutPlotOutput";
 
 static HINSTANCE g_hInst = nullptr;
-static ApplicationPtr g_app;
+static IDispatch* g_app = nullptr;
 static DWORD g_cookie = 0;
 
 static std::wstring GetScriptDir()
@@ -29,6 +29,31 @@ static void RunScript(const wchar_t* name)
     std::wstring script = GetScriptDir() + L"\\" + name;
     std::wstring args = L"\"" + script + L"\"";
     ShellExecuteW(nullptr, L"open", L"wscript.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
+static HRESULT InvokeDispatch(IDispatch* target, const wchar_t* method, VARIANT* args, UINT argc, VARIANT* result = nullptr)
+{
+    if (!target) return E_POINTER;
+    DISPID dispid = 0;
+    LPOLESTR name = const_cast<LPOLESTR>(method);
+    HRESULT hr = target->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
+    if (FAILED(hr)) return hr;
+
+    DISPPARAMS params = {};
+    params.rgvarg = args;
+    params.cArgs = argc;
+    return target->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, result, nullptr, nullptr);
+}
+
+static void AddPluginCommand(IDispatch* app, const wchar_t* id, const wchar_t* caption, const wchar_t* tooltip)
+{
+    VARIANT args[3];
+    for (auto& arg : args) VariantInit(&arg);
+    args[2].vt = VT_BSTR; args[2].bstrVal = SysAllocString(id);
+    args[1].vt = VT_BSTR; args[1].bstrVal = SysAllocString(caption);
+    args[0].vt = VT_BSTR; args[0].bstrVal = SysAllocString(tooltip);
+    InvokeDispatch(app, L"AddPluginCommand", args, 3);
+    for (auto& arg : args) VariantClear(&arg);
 }
 
 class AppEvents : public IDispatch
@@ -101,11 +126,23 @@ extern "C" __declspec(dllexport) DWORD APIENTRY AttachPlugin(IDispatch* app)
     try
     {
         g_app = app;
-        g_app->AddPluginCommand(_bstr_t(kAddMarks), _bstr_t(L"添加标记点"), _bstr_t(L"添加圆形/直角定位标记点"));
-        g_app->AddPluginCommand(_bstr_t(kCutGrid), _bstr_t(L"创建切割表格"), _bstr_t(L"按行列创建切割表格"));
-        g_app->AddPluginCommand(_bstr_t(kCutPlot), _bstr_t(L"刻绘输出"), _bstr_t(L"输出刻绘文件"));
+        g_app->AddRef();
+        AddPluginCommand(g_app, kAddMarks, L"添加标记点", L"添加圆形/直角定位标记点");
+        AddPluginCommand(g_app, kCutGrid, L"创建切割表格", L"按行列创建切割表格");
+        AddPluginCommand(g_app, kCutPlot, L"刻绘输出", L"输出刻绘文件");
+
         g_events = new AppEvents();
-        g_cookie = g_app->AdviseEvents(static_cast<IDispatch*>(g_events));
+        VARIANT args[1];
+        VariantInit(&args[0]);
+        args[0].vt = VT_DISPATCH;
+        args[0].pdispVal = static_cast<IDispatch*>(g_events);
+        VARIANT result;
+        VariantInit(&result);
+        if (SUCCEEDED(InvokeDispatch(g_app, L"AdviseEvents", args, 1, &result)))
+        {
+            if (result.vt == VT_I4 || result.vt == VT_INT) g_cookie = static_cast<DWORD>(result.lVal);
+        }
+        VariantClear(&result);
     }
     catch (...)
     {
@@ -118,10 +155,18 @@ extern "C" __declspec(dllexport) void APIENTRY DetachPlugin()
 {
     try
     {
-        if (g_app && g_cookie) g_app->UnadviseEvents(g_cookie);
+        if (g_app && g_cookie)
+        {
+            VARIANT args[1];
+            VariantInit(&args[0]);
+            args[0].vt = VT_I4;
+            args[0].lVal = static_cast<LONG>(g_cookie);
+            InvokeDispatch(g_app, L"UnadviseEvents", args, 1);
+        }
         if (g_events) g_events->Release();
         g_events = nullptr;
         g_cookie = 0;
+        if (g_app) g_app->Release();
         g_app = nullptr;
     }
     catch (...) {}
