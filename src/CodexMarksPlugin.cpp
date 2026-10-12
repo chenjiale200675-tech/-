@@ -32,7 +32,7 @@ static void RunScript(const wchar_t* name)
 class CodexMarksPlugin final : public IVGAppPlugin
 {
     LONG refs_ = 1;
-    IVGApplication* app_ = nullptr;
+    IDispatch* app_ = nullptr;
     DWORD eventCookie_ = 0;
 
 public:
@@ -107,7 +107,8 @@ public:
 
     STDMETHOD(raw_OnLoad)(IVGApplication* Application) override
     {
-        app_ = Application;
+        app_ = nullptr;
+        if (Application) Application->QueryInterface(IID_IDispatch, reinterpret_cast<void**>(&app_));
         if (app_) app_->AddRef();
         return S_OK;
     }
@@ -118,10 +119,10 @@ public:
 
         try
         {
-            app_->AddPluginCommand(_bstr_t(kAddMarks), _bstr_t(L"添加标记点"), _bstr_t(L"添加圆形/直角定位标记点"));
-            app_->AddPluginCommand(_bstr_t(kCutGrid), _bstr_t(L"创建切割表格"), _bstr_t(L"按行列创建切割表格"));
-            app_->AddPluginCommand(_bstr_t(kCutPlot), _bstr_t(L"刻绘输出"), _bstr_t(L"输出刻绘文件"));
-            app_->AdviseEvents(this, &eventCookie_);
+            AddPluginCommand(kAddMarks, L"添加标记点", L"添加圆形/直角定位标记点");
+            AddPluginCommand(kCutGrid, L"创建切割表格", L"按行列创建切割表格");
+            AddPluginCommand(kCutPlot, L"刻绘输出", L"输出刻绘文件");
+            AdviseEvents();
         }
         catch (...) {}
 
@@ -134,7 +135,11 @@ public:
         {
             if (app_ && eventCookie_)
             {
-                app_->UnadviseEvents(eventCookie_);
+                VARIANT args[1];
+                VariantInit(&args[0]);
+                args[0].vt = VT_I4;
+                args[0].lVal = static_cast<LONG>(eventCookie_);
+                InvokeApp(L"UnadviseEvents", args, 1);
                 eventCookie_ = 0;
             }
         }
@@ -152,6 +157,49 @@ public:
             app_ = nullptr;
         }
         return S_OK;
+    }
+
+private:
+    HRESULT InvokeApp(const wchar_t* method, VARIANT* args, UINT argc, VARIANT* result = nullptr)
+    {
+        if (!app_) return E_POINTER;
+
+        DISPID dispid = 0;
+        LPOLESTR name = const_cast<LPOLESTR>(method);
+        HRESULT hr = app_->GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &dispid);
+        if (FAILED(hr)) return hr;
+
+        DISPPARAMS params = {};
+        params.rgvarg = args;
+        params.cArgs = argc;
+        return app_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, result, nullptr, nullptr);
+    }
+
+    void AddPluginCommand(const wchar_t* id, const wchar_t* caption, const wchar_t* tooltip)
+    {
+        VARIANT args[3];
+        for (auto& arg : args) VariantInit(&arg);
+        args[2].vt = VT_BSTR; args[2].bstrVal = SysAllocString(id);
+        args[1].vt = VT_BSTR; args[1].bstrVal = SysAllocString(caption);
+        args[0].vt = VT_BSTR; args[0].bstrVal = SysAllocString(tooltip);
+        InvokeApp(L"AddPluginCommand", args, 3);
+        for (auto& arg : args) VariantClear(&arg);
+    }
+
+    void AdviseEvents()
+    {
+        VARIANT args[1];
+        VariantInit(&args[0]);
+        args[0].vt = VT_DISPATCH;
+        args[0].pdispVal = static_cast<IDispatch*>(this);
+
+        VARIANT result;
+        VariantInit(&result);
+        if (SUCCEEDED(InvokeApp(L"AdviseEvents", args, 1, &result)))
+        {
+            if (result.vt == VT_I4 || result.vt == VT_INT) eventCookie_ = static_cast<DWORD>(result.lVal);
+        }
+        VariantClear(&result);
     }
 };
 
